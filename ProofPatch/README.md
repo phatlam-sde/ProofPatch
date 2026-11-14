@@ -10,6 +10,9 @@ Compare two revisions of a trusted Python demo repository. Run the same regressi
 | backend/pytest_report.py | Collect structured pytest results inside Docker |
 | frontend/app.py | Streamlit dashboard |
 | demo/ | Known-good source, buggy source, and fixture test |
+| demo/scenarios/ | Seven scenarios with requirements, source pairs, and reference tests |
+| backend/scenarios.py | Load scenarios and create a temporary Git repository per analysis |
+| scripts/check_scenarios.py | Run the scenario collection with fixture or Gemini tests |
 | scripts/new_demo.py | Create a local demo repository with two commits |
 | Dockerfile | Build the Python test runner |
 
@@ -42,6 +45,10 @@ In a second PowerShell window in the same extracted folder, start the dashboard.
 
 ## Gemini integration
 
+The dashboard now offers seven selectable scenarios, including refactoring, an existing bug, a bug fix, a missing dependency, and a discount/shipping interaction. `GET /scenarios` lists them. Supply a scenario ID using `POST /analyze?scenario=discount_interaction&mode=gemini`; omitting it selects `threshold_regression`. Each analysis creates an isolated temporary Git history from the checked-in scenario files, so dashboard runs no longer require `.demo-repo`. The original demo setup script remains available for standalone runner use. See [scenario layout and batch checks](demo/scenarios/README.md).
+
+The report includes the expected base/head outcomes and whether the actual results match. A base assertion failure followed by a passing head produces `previously_failing_test_now_passes`. Both versions failing still produces `inconclusive`.
+
 `POST /analyze` defaults to Gemini; `POST /analyze?mode=fixture` uses the original demo test. The backend sends the shipping requirement, both source versions, and their diff to Google's Gemini API. It requests JSON containing test source and rationale and validates the response before execution. The default model is `gemini-3.5-flash`; set `GEMINI_MODEL` in the backend environment to use another compatible model. No additional Python packages are needed. Environment changes require restarting the backend; `.env` files are not automatically loaded.
 
 This MVP accepts only simple, parameterless test functions asserting `calculate_shipping(literal_total) == literal_cost`, with one approved shipping import. It rejects other generated code before Docker execution. This deliberately supports the trusted shipping demo, not arbitrary repositories. The API key never enters the test container. The same generated tests run against both revisions. Assertion failures are identified through pytest reports; collection errors, runtime errors, skipped tests, and empty suites do not prove regressions.
@@ -58,7 +65,7 @@ API reference: [Gemini generateContent](https://ai.google.dev/api/generate-conte
 
 1. Confirm the fixed shipping test produces pass → assertion failure. Check that missing dependencies and timeouts are inconclusive.
 2. Evaluate generated test quality across repeated runs and additional boundary cases.
-3. Add a second independent regression scenario, and show the diff, test source, and both results. Try an unchanged pair to confirm pass → pass.
+3. Expand beyond the shipping interface to multi-function examples after evaluating the seven included scenarios.
 4. Keep the MVP local and limited to trusted demo repositories. Before accepting external repositories or relaxing generated-test restrictions, design and validate stronger isolation for untrusted code.
 
 Gemini generation is implemented; the fixed fixture remains available for offline demos.

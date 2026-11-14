@@ -2,14 +2,24 @@ import requests
 import streamlit as st
 
 st.title("ProofPatch")
-st.caption("Shipping threshold demo · targeted regression tests")
+st.caption("Regression scenarios · targeted tests")
+try:
+    catalog_response = requests.get("http://127.0.0.1:8000/scenarios", timeout=10)
+    catalog_response.raise_for_status()
+    catalog = catalog_response.json()
+except requests.RequestException:
+    st.error("Could not load scenarios. Start or restart the backend.")
+    st.stop()
+selected = st.selectbox("Scenario", catalog, format_func=lambda item: item["title"])
+st.write(selected["requirement"])
 mode = st.radio("Test source", ["gemini", "fixture"], format_func=lambda value: {
     "gemini": "Generate with Gemini", "fixture": "Handwritten demo fallback"}[value])
 
 if st.button("Analyze demo"):
     try:
         with st.spinner("Generating tests and testing both revisions" if mode == "gemini" else "Testing both revisions"):
-            response = requests.post("http://127.0.0.1:8000/analyze", params={"mode": mode}, timeout=180)
+            response = requests.post("http://127.0.0.1:8000/analyze",
+                                     params={"mode": mode, "scenario": selected["id"]}, timeout=180)
             if not response.ok:
                 st.error(response.json().get("detail", "Analysis failed."))
                 st.stop()
@@ -20,6 +30,12 @@ if st.button("Analyze demo"):
         st.stop()
 
     st.metric("Verdict", report["verdict"])
+    expected = report["scenario"]["expected"]
+    st.caption(f"Expected: base {expected['base']} → head {expected['head']} · {expected['verdict']}")
+    if report["matches_expected"]:
+        st.success("Results match this scenario's expected outcome.")
+    else:
+        st.warning("Results differ from the expected outcome. Review the generated assertions and execution output.")
     st.caption("A passing result covers only the tests shown below.")
     st.write("Requirement:", report["requirement"])
     generation = report["generation"]

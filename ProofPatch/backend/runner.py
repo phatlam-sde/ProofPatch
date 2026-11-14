@@ -23,13 +23,13 @@ def classify_result(returncode, output):
         pass
     return "inconclusive"
 
-def git(*args):
-    return subprocess.check_output(["git", "-C", str(REPO), *args], timeout=10)
+def git(*args, repo=REPO):
+    return subprocess.check_output(["git", "-C", str(repo), *args], timeout=10)
 
-def run_test(revision, test_source):
+def run_test(revision, test_source, repo=REPO):
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory)
-        (source / "shipping.py").write_bytes(git("show", f"{revision}:shipping.py"))
+        (source / "shipping.py").write_bytes(git("show", f"{revision}:shipping.py", repo=repo))
         (source / "test_shipping.py").write_text(test_source, encoding="utf-8")
         (source / "pytest_report.py").write_bytes((ROOT / "backend" / "pytest_report.py").read_bytes())
         name = f"proofpatch-{uuid.uuid4().hex}"

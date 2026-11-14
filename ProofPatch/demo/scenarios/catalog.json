@@ -1,0 +1,73 @@
+[
+  {
+    "id": "threshold_regression",
+    "title": "Shipping threshold regression",
+    "requirement": "Shipping costs 0 when the order total is at least 50; otherwise it costs 5.",
+    "expected": {
+      "base": "pass",
+      "head": "assertion_failed",
+      "verdict": "regression"
+    }
+  },
+  {
+    "id": "correct_refactor",
+    "title": "Correct refactor",
+    "requirement": "Shipping costs 0 when the order total is at least 50; otherwise it costs 5.",
+    "expected": {
+      "base": "pass",
+      "head": "pass",
+      "verdict": "no_regression_observed"
+    }
+  },
+  {
+    "id": "identical_revision",
+    "title": "Same commit compared with itself",
+    "requirement": "Shipping costs 0 when the order total is at least 50; otherwise it costs 5.",
+    "expected": {
+      "base": "pass",
+      "head": "pass",
+      "verdict": "no_regression_observed"
+    },
+    "same_revision": true
+  },
+  {
+    "id": "existing_bug",
+    "title": "Bug already present in both versions",
+    "requirement": "Shipping costs 0 when the order total is at least 50; otherwise it costs 5.",
+    "expected": {
+      "base": "assertion_failed",
+      "head": "assertion_failed",
+      "verdict": "inconclusive"
+    }
+  },
+  {
+    "id": "bug_fix",
+    "title": "Shipping threshold bug fix",
+    "requirement": "Shipping costs 0 when the order total is at least 50; otherwise it costs 5.",
+    "expected": {
+      "base": "assertion_failed",
+      "head": "pass",
+      "verdict": "previously_failing_test_now_passes"
+    }
+  },
+  {
+    "id": "missing_dependency",
+    "title": "Missing dependency in new version",
+    "requirement": "Shipping costs 0 when the order total is at least 50; otherwise it costs 5.",
+    "expected": {
+      "base": "pass",
+      "head": "inconclusive",
+      "verdict": "inconclusive"
+    }
+  },
+  {
+    "id": "discount_interaction",
+    "title": "Discount eligibility affects shipping",
+    "requirement": "For a nonnegative order total, apply a discount of 10 when the original total is at least 60. Shipping costs 0 when the discounted subtotal is at least 50, otherwise 5. For example, totals 49, 50, 59, and 60 have shipping costs 5, 0, 0, and 0 respectively.",
+    "expected": {
+      "base": "pass",
+      "head": "assertion_failed",
+      "verdict": "regression"
+    }
+  }
+]

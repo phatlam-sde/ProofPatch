@@ -1,9 +1,11 @@
 import json
 import unittest
+import requests
 from unittest.mock import Mock, patch
 
 from backend.generator import GenerationError, generate_test, validate_test
 from backend.runner import classify_result
+from backend.scenarios import SCENARIOS, get_scenario, list_scenarios
 
 VALID = "from shipping import calculate_shipping\n\ndef test_threshold():\n    assert calculate_shipping(50) == 0\n"
 
@@ -43,6 +45,25 @@ class GeneratorTests(unittest.TestCase):
             generate_test("", "", "")
         self.assertNotIn("secret-test-key", str(error.exception))
 
+    @patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
+    @patch("backend.generator.requests.post")
+    def test_transport_errors_are_distinguished(self, post):
+        for error, message in [
+            (requests.Timeout(), "timed out"),
+            (requests.exceptions.SSLError(), "secure connection"),
+            (requests.ConnectionError(), "establish or maintain"),
+        ]:
+            with self.subTest(error=type(error).__name__):
+                post.side_effect = error
+                with self.assertRaisesRegex(GenerationError, message):
+                    generate_test("", "", "")
+
+    @patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"})
+    @patch("backend.generator.requests.post", return_value=Mock(status_code=503))
+    def test_service_unavailable_is_not_reported_as_quota(self, post):
+        with self.assertRaisesRegex(GenerationError, "temporarily unavailable or overloaded"):
+            generate_test("", "", "")
+
 
 class RunnerTests(unittest.TestCase):
     def test_classification(self):
@@ -57,6 +78,36 @@ class RunnerTests(unittest.TestCase):
                 output = "PROOFPATCH_RESULT=" + json.dumps({"exit_code": code, "results": results})
                 self.assertEqual(classify_result(code, output), expected)
         self.assertEqual(classify_result(1, "assert 5 == 0"), "inconclusive")
+
+
+class ScenarioTests(unittest.TestCase):
+    def test_catalog_fixtures_are_valid_generated_test_shapes(self):
+        catalog = list_scenarios()
+        self.assertEqual(len({item["id"] for item in catalog}), 7)
+        for scenario in catalog:
+            with self.subTest(scenario=scenario["id"]):
+                folder = SCENARIOS / scenario["id"]
+                validate_test((folder / "test_shipping.py").read_text(encoding="utf-8"))
+                for version in ("base", "head"):
+                    self.assertTrue((folder / version / "shipping.py").is_file())
+
+    def test_unknown_scenario_cannot_select_arbitrary_paths(self):
+        with self.assertRaises(ValueError):
+            get_scenario("../../backend")
+
+    @patch("backend.main.generate_test")
+    @patch("backend.main.scenario_repository")
+    @patch("backend.main.git", return_value=b"source")
+    @patch("backend.main.run_test")
+    def test_scenario_requirement_and_bug_fix_verdict(self, run_test, git, repository, generate):
+        from backend.main import analyze
+        repository.return_value.__enter__.return_value = ("repo", "base", "head")
+        generate.return_value = {"test_source": VALID, "rationale": "Boundary", "source": "gemini", "model": "test"}
+        run_test.side_effect = [{"status": "assertion_failed", "output": ""}, {"status": "pass", "output": ""}]
+        report = analyze(scenario="bug_fix")
+        self.assertTrue(report["matches_expected"])
+        self.assertEqual(report["verdict"], "previously_failing_test_now_passes")
+        self.assertEqual(generate.call_args.kwargs["requirement"], get_scenario("bug_fix")["requirement"])
 
 
 if __name__ == "__main__":

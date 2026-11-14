@@ -61,7 +61,7 @@ def validate_test(source):
     return source
 
 
-def generate_test(base_source, head_source, diff):
+def generate_test(base_source, head_source, diff, requirement=REQUIREMENT):
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
         raise GenerationError("Set GEMINI_API_KEY in the backend environment, then restart the backend.")
@@ -76,9 +76,10 @@ def generate_test(base_source, head_source, diff):
         "unique test_ functions with no arguments, decorators, annotations, or docstrings. "
         "Each body must contain only assertions of the form assert calculate_shipping(50) == 0. "
         "Use literal nonnegative numeric inputs and expected integer costs 0 or 5. "
+        "Cover requirement boundaries even if the diff is empty or both versions share a bug. "
         "Include the boundary affected by the diff and neighboring values. No other imports, "
         "variables, fixtures, calls, IO, or helper functions. The same tests run on both versions.\n"
-        + json.dumps({"requirement": REQUIREMENT, "base_source": base_source,
+        + json.dumps({"requirement": requirement, "base_source": base_source,
                       "head_source": head_source, "diff": diff})
     )
     try:
@@ -92,10 +93,26 @@ def generate_test(base_source, head_source, diff):
                     "required": ["test_source", "rationale"]}}},
             timeout=(10, 60),
         )
+    except requests.Timeout:
+        raise GenerationError("Gemini request timed out before a complete response arrived. Try again shortly.") from None
+    except requests.exceptions.SSLError:
+        raise GenerationError("The secure connection to Gemini failed certificate verification or negotiation. Check certificate and proxy settings.") from None
+    except requests.ConnectionError:
+        raise GenerationError("The backend could not establish or maintain a connection to Google's Gemini API. This can involve DNS, a firewall, a proxy, or a connection reset; it does not establish that your internet is down.") from None
     except requests.RequestException:
-        raise GenerationError("Could not reach Gemini. Check network access and try again.") from None
+        raise GenerationError("The Gemini request failed before a complete HTTP response arrived. Try again.") from None
     if response.status_code != 200:
-        raise GenerationError(f"Gemini returned HTTP {response.status_code}. Check the API key, model access, and quota.")
+        guidance = {
+            400: "The request or API key was rejected. Check the key and model configuration.",
+            401: "Authentication failed. Check GEMINI_API_KEY in the backend environment.",
+            403: "Access was denied. Check API key restrictions and project permissions.",
+            404: "The model or endpoint was not found. Check GEMINI_MODEL.",
+            429: "A rate or quota limit was reached. Check this key's project usage in Google AI Studio.",
+            500: "Gemini encountered an internal service error. Try again shortly.",
+            503: "Gemini is temporarily unavailable or overloaded. Try again shortly.",
+            504: "Gemini's service deadline expired. Try again shortly.",
+        }.get(response.status_code, "The Gemini service rejected the request.")
+        raise GenerationError(f"Gemini returned HTTP {response.status_code}. {guidance}")
     try:
         candidate = response.json()["candidates"][0]
         if candidate.get("finishReason") != "STOP":

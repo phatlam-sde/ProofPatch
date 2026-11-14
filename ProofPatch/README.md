@@ -6,6 +6,8 @@ Compare two revisions of a trusted Python demo repository. Run the same regressi
 |---|---|
 | backend/main.py | FastAPI endpoint and verdict |
 | backend/runner.py | Export Git revisions and run pytest in Docker |
+| backend/generator.py | Request and validate targeted Gemini tests |
+| backend/pytest_report.py | Collect structured pytest results inside Docker |
 | frontend/app.py | Streamlit dashboard |
 | demo/ | Known-good source, buggy source, and fixture test |
 | scripts/new_demo.py | Create a local demo repository with two commits |
@@ -24,23 +26,39 @@ docker build -t proofpatch-runner:local .
 
 These commands create a local Python environment, install app dependencies, create .demo-repo with two commits, and build the pytest runner image. Expect the script to print the two commit IDs and Docker to tag the finished image.
 
-In that PowerShell window, start the API. This serves the analysis endpoint on localhost port 8000. Expect Uvicorn to report that the server is running.
+In that PowerShell window, set the API key and start the API. The key stays in the backend environment and is not sent to Docker or the dashboard. The secure prompt keeps it out of command history. If GEMINI_API_KEY is already set, skip the first two lines. Expect Uvicorn to report that the server is running on port 8000.
 
 ```powershell
+$geminiSecret = Read-Host 'Gemini API key' -AsSecureString
+$env:GEMINI_API_KEY = [System.Net.NetworkCredential]::new('', $geminiSecret).Password
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app
 ```
 
-In a second PowerShell window in the same extracted folder, start the dashboard. This opens the Streamlit app at http://localhost:8501. Select **Analyze demo**. Expect base **pass**, head **assertion_failed**, and verdict **regression**.
+In a second PowerShell window in the same extracted folder, start the dashboard. This opens the Streamlit app at http://localhost:8501. Select **Generate with Gemini**, then **Analyze demo**. Expect a generated test and rationale, base **pass**, head **assertion_failed**, and verdict **regression**. The handwritten fallback is selectable explicitly; API failures never silently substitute a fixture.
 
 ```powershell
 .\.venv\Scripts\python.exe -m streamlit run frontend/app.py
 ```
 
-## Build order
+## Gemini integration
+
+`POST /analyze` defaults to Gemini; `POST /analyze?mode=fixture` uses the original demo test. The backend sends the shipping requirement, both source versions, and their diff to Google's Gemini API. It requests JSON containing test source and rationale and validates the response before execution. The default model is `gemini-3.5-flash`; set `GEMINI_MODEL` in the backend environment to use another compatible model. No additional Python packages are needed. Environment changes require restarting the backend; `.env` files are not automatically loaded.
+
+This MVP accepts only simple, parameterless test functions asserting `calculate_shipping(literal_total) == literal_cost`, with one approved shipping import. It rejects other generated code before Docker execution. This deliberately supports the trusted shipping demo, not arbitrary repositories. The API key never enters the test container. The same generated tests run against both revisions. Assertion failures are identified through pytest reports; collection errors, runtime errors, skipped tests, and empty suites do not prove regressions.
+
+In PowerShell in the ProofPatch folder, run the backend checks below. They use mocked Gemini responses and check validation, missing credentials, quota errors, and verdict classification without spending API quota. Expect all tests to pass.
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+API reference: [Gemini generateContent](https://ai.google.dev/api/generate-content).
+
+## Next steps
 
 1. Confirm the fixed shipping test produces pass → assertion failure. Check that missing dependencies and timeouts are inconclusive.
-2. Add backend/generator.py. Send Gemini the Git diff, relevant source, and shipping requirement. Request a structured response with test source and rationale. Read GEMINI_API_KEY on the backend and keep it out of the runner. Keep the fixed test available as a demo fallback and label its source in the UI.
+2. Evaluate generated test quality across repeated runs and additional boundary cases.
 3. Add a second independent regression scenario, and show the diff, test source, and both results. Try an unchanged pair to confirm pass → pass.
-4. Keep the MVP local and limited to trusted demo repositories. Before accepting external repositories or executing generated tests, design and validate stronger isolation for untrusted code.
+4. Keep the MVP local and limited to trusted demo repositories. Before accepting external repositories or relaxing generated-test restrictions, design and validate stronger isolation for untrusted code.
 
-The starter uses a fixed fixture test. Gemini generation is the next implementation milestone.
+Gemini generation is implemented; the fixed fixture remains available for offline demos.

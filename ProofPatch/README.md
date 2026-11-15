@@ -55,7 +55,20 @@ The report includes the expected base/head outcomes and whether the actual resul
 
 ## GitHub pull request check
 
-Publish the ProofPatch commit containing `.github/workflows/checkout-regression.yml` first. In the separate checkout repository, add `.github/workflows/proofpatch.yml` to the branch containing the working checkout code. Use the following contents and replace `PROOFPATCH_COMMIT_SHA` with the full SHA of the published ProofPatch commit:
+The reusable workflow generates candidate tests with Gemini for trusted same-repository
+PRs. It supports only root-level `checkout.py`, `pricing.py`, and `shipping.py`.
+
+Add `proofpatch-requirements.md` to the target repository's base branch before opening
+a PR. It must contain 1–4000 characters of UTF-8 expected behavior. ProofPatch reads
+it from the PR's exact base commit, not the working tree or proposed head. If the PR
+changes the requirements, the summary flags this for review and still uses the base
+rules. Intentional behavior changes need review of the requirements before adopting
+new expectations.
+
+In the target repository's GitHub Settings → Secrets and variables → Actions, create
+a repository secret named `GEMINI_API_KEY` using your own key. Do not put the key in
+source files. Add `.github/workflows/proofpatch.yml` with the following contents,
+replacing `PROOFPATCH_COMMIT_SHA` with the full published implementation commit SHA:
 
 ```yaml
 name: ProofPatch
@@ -67,11 +80,34 @@ permissions:
 jobs:
   checkout-regression:
     uses: phatlam-sde/ProofPatch/.github/workflows/checkout-regression.yml@PROOFPATCH_COMMIT_SHA
+    secrets:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 ```
 
-This setup assumes the checkout repository can access the reusable ProofPatch workflow and read its source. The job runs only for PRs from branches in the same repository. It uses the PR event's base and head SHAs, calls the existing API with the supplied checkout test, and writes both outcomes to the job summary. It requires no Gemini key.
+An optional `with: {gemini_model: MODEL_NAME}` selects another compatible model.
+The default matches the backend. Each run reads both committed source versions and
+their diff, generates and validates one candidate suite, then calls the comparison
+API to run exactly that suite against both commits in isolated Docker containers.
+The secret is only passed to the analysis step; it is not passed into test containers.
 
-To demo it, open a PR into the branch containing the working checkout and the caller workflow, from a branch containing the same workflow plus the shipping regression. Expect the check to fail with the `regression` verdict and an assertion showing `55 == 50` in the step log. Push a fix restoring the inclusive threshold and expect a successful check. An inconclusive comparison fails the check with a separate verdict, so Docker or API failures cannot appear as a pass.
+A passing base and failing head report `regression` (exit 1). Both passing report
+`no_regression_observed` (exit 0), which covers only the generated tests. A failing
+base, invalid response, missing requirements/key, quota limit, or execution problem
+reports `inconclusive` (exit 2). Candidates are never automatically marked verified.
+No handwritten fallback silently replaces failed generation.
+
+The job summary reports the verdict and requirement revision. The run's downloadable
+`proofpatch-<run>-<attempt>` artifact is retained for 14 days and contains available
+inputs, requirements, code diff, candidate test, generation rationale/model, and
+comparison report. Candidates are saved before execution so execution failures do
+not discard them. Setup failures before analysis may have no artifact. Review and
+commit approved tests separately for permanent storage; automatic approved-test
+reuse is not implemented yet.
+
+To demonstrate the check, branch from the correct checkout baseline, change the
+shipping threshold from `>= 50` to `> 50`, and open a PR. A valid boundary test should
+pass on base and fail on head. Restore `>= 50` on the PR branch and verify the next
+run passes. Real Gemini results depend on model quality and quota.
 
 `POST /analyze` defaults to Gemini; `POST /analyze?mode=fixture` uses the original demo test. The backend sends the shipping requirement, both source versions, and their diff to Google's Gemini API. It requests JSON containing test source and rationale and validates the response before execution. The default model is `gemini-3.5-flash`; set `GEMINI_MODEL` in the backend environment to use another compatible model. No additional Python packages are needed. Environment changes require restarting the backend; `.env` files are not automatically loaded.
 

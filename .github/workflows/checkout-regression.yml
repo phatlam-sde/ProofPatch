@@ -2,6 +2,15 @@ name: ProofPatch checkout regression
 
 on:
   workflow_call:
+    inputs:
+      gemini_model:
+        description: Gemini model used to generate candidate checkout tests
+        type: string
+        default: gemini-3.5-flash
+    secrets:
+      GEMINI_API_KEY:
+        description: Gemini API key owned by the caller
+        required: false
 
 permissions:
   contents: read
@@ -45,4 +54,16 @@ jobs:
         working-directory: proofpatch-tool/ProofPatch
         env:
           PROOFPATCH_TARGET: ${{ github.workspace }}/target
+          PROOFPATCH_OUTPUT: ${{ github.workspace }}/proofpatch-results
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ inputs.gemini_model }}
         run: python -m scripts.check_pull_request
+
+      - name: Save candidate tests and comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proofpatch-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/proofpatch-results/
+          retention-days: 14
+          if-no-files-found: warn

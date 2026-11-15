@@ -45,13 +45,39 @@ In a second PowerShell window in the same extracted folder, start the dashboard.
 
 ## Gemini integration
 
+To compare commits in the separate `checkout-test-repo`, select **Local checkout repository** in the dashboard. Enter the absolute path to that repository, use `baseline` and `regression` as the revisions, and enter the checkout rules from its README as the expected behavior. Confirm you trust the repository and select **Compare commits**. This mode reads `checkout.py`, `pricing.py`, and `shipping.py` at the selected commits without checking them out. It supports commit SHAs and tags.
+
+Choose **Provide a test** to run the prefilled checkout assertion without calling Gemini. Expect the base to pass, the new commit to fail with `55 == 50`, and the verdict to be **regression**. **Generate with Gemini** sends those three files from both commits, their diff, and the expected behavior to the Gemini API and runs the generated test against both commits in Docker.
+
 The dashboard now offers seven selectable scenarios, including refactoring, an existing bug, a bug fix, a missing dependency, and a discount/shipping interaction. `GET /scenarios` lists them. Supply a scenario ID using `POST /analyze?scenario=discount_interaction&mode=gemini`; omitting it selects `threshold_regression`. Each analysis creates an isolated temporary Git history from the checked-in scenario files, so dashboard runs no longer require `.demo-repo`. The original demo setup script remains available for standalone runner use. See [scenario layout and batch checks](demo/scenarios/README.md).
 
 The report includes the expected base/head outcomes and whether the actual results match. A base assertion failure followed by a passing head produces `previously_failing_test_now_passes`. Both versions failing still produces `inconclusive`.
 
+## GitHub pull request check
+
+Publish the ProofPatch commit containing `.github/workflows/checkout-regression.yml` first. In the separate checkout repository, add `.github/workflows/proofpatch.yml` to the branch containing the working checkout code. Use the following contents and replace `PROOFPATCH_COMMIT_SHA` with the full SHA of the published ProofPatch commit:
+
+```yaml
+name: ProofPatch
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+jobs:
+  checkout-regression:
+    uses: phatlam-sde/ProofPatch/.github/workflows/checkout-regression.yml@PROOFPATCH_COMMIT_SHA
+```
+
+This setup assumes the checkout repository can access the reusable ProofPatch workflow and read its source. The job runs only for PRs from branches in the same repository. It uses the PR event's base and head SHAs, calls the existing API with the supplied checkout test, and writes both outcomes to the job summary. It requires no Gemini key.
+
+To demo it, open a PR into the branch containing the working checkout and the caller workflow, from a branch containing the same workflow plus the shipping regression. Expect the check to fail with the `regression` verdict and an assertion showing `55 == 50` in the step log. Push a fix restoring the inclusive threshold and expect a successful check. An inconclusive comparison fails the check with a separate verdict, so Docker or API failures cannot appear as a pass.
+
 `POST /analyze` defaults to Gemini; `POST /analyze?mode=fixture` uses the original demo test. The backend sends the shipping requirement, both source versions, and their diff to Google's Gemini API. It requests JSON containing test source and rationale and validates the response before execution. The default model is `gemini-3.5-flash`; set `GEMINI_MODEL` in the backend environment to use another compatible model. No additional Python packages are needed. Environment changes require restarting the backend; `.env` files are not automatically loaded.
 
-This MVP accepts only simple, parameterless test functions asserting `calculate_shipping(literal_total) == literal_cost`, with one approved shipping import. It rejects other generated code before Docker execution. This deliberately supports the trusted shipping demo, not arbitrary repositories. The API key never enters the test container. The same generated tests run against both revisions. Assertion failures are identified through pytest reports; collection errors, runtime errors, skipped tests, and empty suites do not prove regressions.
+## Test validation
+
+The built-in scenarios accept simple, parameterless tests asserting `calculate_shipping(literal_total) == literal_cost`. The local checkout comparison accepts the same shape with `checkout_total`. The API key never enters the test container. The same tests run against both revisions. Assertion failures are identified through pytest reports; collection errors, runtime errors, skipped tests, and empty suites do not prove regressions.
 
 In PowerShell in the ProofPatch folder, run the backend checks below. They use mocked Gemini responses and check validation, missing credentials, quota errors, and verdict classification without spending API quota. Expect all tests to pass.
 

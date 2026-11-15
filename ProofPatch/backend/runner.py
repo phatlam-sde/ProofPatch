@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import os
 import subprocess
 import tempfile
 import uuid
@@ -26,12 +27,16 @@ def classify_result(returncode, output):
 def git(*args, repo=REPO):
     return subprocess.check_output(["git", "-C", str(repo), *args], timeout=10)
 
-def run_test(revision, test_source, repo=REPO):
+def run_test(revision, test_source, repo=REPO, *, files=("shipping.py",)):
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory)
-        (source / "shipping.py").write_bytes(git("show", f"{revision}:shipping.py", repo=repo))
+        for filename in files:
+            (source / filename).write_bytes(git("show", f"{revision}:{filename}", repo=repo))
         (source / "test_shipping.py").write_text(test_source, encoding="utf-8")
         (source / "pytest_report.py").write_bytes((ROOT / "backend" / "pytest_report.py").read_bytes())
+        if os.name == "posix":
+            # The read-only Docker mount must be traversable by the image's non-root user.
+            source.chmod(0o755)
         name = f"proofpatch-{uuid.uuid4().hex}"
         command = [
             "docker", "run", "--rm", "--name", name, "--network", "none",
@@ -44,8 +49,12 @@ def run_test(revision, test_source, repo=REPO):
         try:
             result = subprocess.run(command, capture_output=True, text=True, timeout=30)
         except subprocess.TimeoutExpired:
-            subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=10)
-            return {"status": "timeout", "output": "Test execution exceeded 30 seconds."}
+            output = "Test execution exceeded 30 seconds."
+            try:
+                subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                output += " Docker did not respond to container cleanup."
+            return {"status": "timeout", "output": output}
 
         output = result.stdout + result.stderr
         status = classify_result(result.returncode, output)

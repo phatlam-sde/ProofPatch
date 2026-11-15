@@ -1,0 +1,48 @@
+name: ProofPatch checkout regression
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Compare checkout commits
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the PR head and Git history
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          path: target
+          persist-credentials: false
+
+      - name: Check out the ProofPatch version defining this workflow
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: proofpatch-tool
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install the API dependencies
+        working-directory: proofpatch-tool/ProofPatch
+        run: python -m pip install -r requirements.txt
+
+      - name: Build the isolated pytest runner
+        working-directory: proofpatch-tool/ProofPatch
+        run: docker build -t proofpatch-runner:local .
+
+      - name: Call the ProofPatch API
+        working-directory: proofpatch-tool/ProofPatch
+        env:
+          PROOFPATCH_TARGET: ${{ github.workspace }}/target
+        run: python -m scripts.check_pull_request
